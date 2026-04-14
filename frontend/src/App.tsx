@@ -4,7 +4,7 @@ import ControlPanel from './components/ControlPanel';
 import InfoPanel from './components/InfoPanel';
 import type { Edge, NodePoint, RouteResponse } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://manet-backend.onrender.com';
 const CANVAS_WIDTH = 900;
 const CANVAS_HEIGHT = 540;
 
