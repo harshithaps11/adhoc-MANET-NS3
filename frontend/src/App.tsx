@@ -199,12 +199,13 @@ export default function App() {
     }
 
     try {
+      const routeUrl = `${API_BASE}/find-route`;
       let response: Response | null = null;
 
       // Render free instances can wake up slowly; retry once before failing.
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          response = await fetch(`${API_BASE}/find-route`, {
+          response = await fetch(routeUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sourceId, destinationId }),
@@ -228,7 +229,9 @@ export default function App() {
 
       if (!response.ok) {
         const text = await safeReadText(response);
-        throw new Error(`HTTP ${response.status}${text ? `: ${text.slice(0, 80)}` : ''}`);
+        throw new Error(
+          `HTTP ${response.status} at ${response.url || routeUrl}${text ? `: ${text.slice(0, 80)}` : ''}`,
+        );
       }
 
       let data: RouteResponse;
