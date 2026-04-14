@@ -2,10 +2,23 @@ const express = require('express');
 const cors = require('cors');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
-app.use(cors());
+app.use(
+  cors({
+    origin: CORS_ORIGIN,
+  }),
+);
 app.use(express.json());
+
+app.get('/', (_req, res) => {
+  res.json({
+    service: 'MANET backend',
+    status: 'ok',
+    message: 'Backend is running. Use /debug-graph, /add-node, /connect-nodes, /find-route, and /reset.',
+  });
+});
 
 const graph = {
   nodes: new Set(),
