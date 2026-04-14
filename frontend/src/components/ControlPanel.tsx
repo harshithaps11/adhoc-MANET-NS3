@@ -78,7 +78,7 @@ export default function ControlPanel({
         <input
           type="range"
           min={60}
-          max={220}
+          max={900}
           step={10}
           value={range}
           onChange={(event) => onRangeChange(Number(event.target.value))}

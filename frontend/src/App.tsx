@@ -54,6 +54,85 @@ function computeEdges(nodes: NodePoint[], range: number, linkFailureEnabled: boo
   return generated;
 }
 
+function edgeKey(from: number, to: number) {
+  return from < to ? `${from}-${to}` : `${to}-${from}`;
+}
+
+function hasPath(nodeIds: number[], edges: Edge[], sourceId: number, destinationId: number) {
+  const adjacency = new Map<number, Set<number>>();
+  for (const id of nodeIds) {
+    adjacency.set(id, new Set());
+  }
+
+  for (const edge of edges) {
+    adjacency.get(edge.from)?.add(edge.to);
+    adjacency.get(edge.to)?.add(edge.from);
+  }
+
+  const queue = [sourceId];
+  const visited = new Set<number>([sourceId]);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === destinationId) {
+      return true;
+    }
+
+    for (const neighbor of adjacency.get(current ?? -1) ?? []) {
+      if (visited.has(neighbor)) {
+        continue;
+      }
+      visited.add(neighbor);
+      queue.push(neighbor);
+    }
+  }
+
+  return false;
+}
+
+function buildAutoBridgeEdges(nodes: NodePoint[], currentEdges: Edge[], sourceId: number, destinationId: number) {
+  const nodeIds = nodes.map((node) => node.id);
+  if (hasPath(nodeIds, currentEdges, sourceId, destinationId)) {
+    return { edges: currentEdges, addedCount: 0, maxBridgeDistance: 0 };
+  }
+
+  const existing = new Set(currentEdges.map((edge) => edgeKey(edge.from, edge.to)));
+  const candidates: Array<{ from: number; to: number; distance: number }> = [];
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      const a = nodes[i];
+      const b = nodes[j];
+      if (existing.has(edgeKey(a.id, b.id))) {
+        continue;
+      }
+
+      candidates.push({
+        from: a.id,
+        to: b.id,
+        distance: Math.hypot(a.x - b.x, a.y - b.y),
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.distance - b.distance);
+
+  const nextEdges = [...currentEdges];
+  let addedCount = 0;
+  let maxBridgeDistance = 0;
+
+  for (const candidate of candidates) {
+    nextEdges.push({ from: candidate.from, to: candidate.to });
+    addedCount += 1;
+    maxBridgeDistance = Math.max(maxBridgeDistance, candidate.distance);
+
+    if (hasPath(nodeIds, nextEdges, sourceId, destinationId)) {
+      return { edges: nextEdges, addedCount, maxBridgeDistance };
+    }
+  }
+
+  return { edges: currentEdges, addedCount: 0, maxBridgeDistance: 0 };
+}
+
 export default function App() {
   const [nodes, setNodes] = useState<NodePoint[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -200,46 +279,68 @@ export default function App() {
 
     try {
       const routeUrl = `${API_BASE}/find-route`;
-      let response: Response | null = null;
 
-      // Render free instances can wake up slowly; retry once before failing.
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        try {
-          response = await fetch(routeUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sourceId, destinationId }),
-          });
-          if (response.ok) {
-            break;
+      const requestRoute = async () => {
+        let response: Response | null = null;
+
+        // Render free instances can wake up slowly; retry once before failing.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            response = await fetch(routeUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sourceId, destinationId }),
+            });
+            if (response.ok) {
+              break;
+            }
+          } catch {
+            // Continue to retry path below.
           }
+
+          if (attempt === 0) {
+            addLog('Backend waking up... retrying route request.');
+            await sleep(1200);
+          }
+        }
+
+        if (!response) {
+          throw new Error('No response from backend');
+        }
+
+        if (!response.ok) {
+          const text = await safeReadText(response);
+          throw new Error(
+            `HTTP ${response.status} at ${response.url || routeUrl}${text ? `: ${text.slice(0, 80)}` : ''}`,
+          );
+        }
+
+        try {
+          return (await response.json()) as RouteResponse;
         } catch {
-          // Continue to retry path below.
+          const text = await safeReadText(response);
+          throw new Error(`Invalid JSON response${text ? `: ${text.slice(0, 80)}` : ''}`);
         }
+      };
 
-        if (attempt === 0) {
-          addLog('Backend waking up... retrying route request.');
-          await sleep(1200);
+      let data = await requestRoute();
+
+      if (data.path.length === 0) {
+        const autoBridge = buildAutoBridgeEdges(nodes, edges, sourceId, destinationId);
+        if (autoBridge.addedCount > 0) {
+          setMobilityEnabled(false);
+          setLinkFailureEnabled(false);
+          setEdges(autoBridge.edges);
+          await syncEdgesToBackend(autoBridge.edges);
+
+          const suggestedRange = Math.min(900, Math.ceil(autoBridge.maxBridgeDistance / 10) * 10);
+          if (suggestedRange > range) {
+            setRange(suggestedRange);
+          }
+
+          addLog(`Auto-connected ${autoBridge.addedCount} bridge link(s) and retrying best route.`);
+          data = await requestRoute();
         }
-      }
-
-      if (!response) {
-        throw new Error('No response from backend');
-      }
-
-      if (!response.ok) {
-        const text = await safeReadText(response);
-        throw new Error(
-          `HTTP ${response.status} at ${response.url || routeUrl}${text ? `: ${text.slice(0, 80)}` : ''}`,
-        );
-      }
-
-      let data: RouteResponse;
-      try {
-        data = (await response.json()) as RouteResponse;
-      } catch {
-        const text = await safeReadText(response);
-        throw new Error(`Invalid JSON response${text ? `: ${text.slice(0, 80)}` : ''}`);
       }
 
       setRoutePath(data.path);
