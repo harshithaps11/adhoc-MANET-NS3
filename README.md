@@ -169,6 +169,42 @@ To proceed with Ubuntu WSL + NS-3 installation:
 
 Note: this may require admin approval and reboot because WSL distro installation is a system-level action.
 
+## Deployment
+
+This project has two deployment parts:
+
+1. Web app deployment (React + Node API)
+2. NS-3 simulation execution (Linux environment)
+
+### Deploy React + Node (recommended stack: Render)
+
+Backend service:
+
+- Root directory: `backend`
+- Build command: `npm install`
+- Start command: `npm run start`
+- Environment variables:
+  - `PORT` is provided by platform automatically
+  - `CORS_ORIGIN` set to your deployed frontend URL
+
+Frontend static site:
+
+- Root directory: `frontend`
+- Build command: `npm install && npm run build`
+- Publish directory: `dist`
+- Environment variable:
+  - `VITE_API_BASE_URL` set to your backend service URL
+
+Tip: Copy `frontend/.env.example` to `.env` for local development and set `VITE_API_BASE_URL`.
+
+### About NS-3 deployment
+
+NS-3 is not a browser app deployment target. Run it on Linux/WSL (or a Linux VM/server) and present results using:
+
+- terminal metrics output
+- NetAnim XML playback (`manet-aodv.xml`)
+- CSV logs from `ns3/run_scenarios.py`
+
 ## Demo Scenario (Quick Viva Flow)
 
 1. Click 5 to 7 points on canvas to add nodes.
