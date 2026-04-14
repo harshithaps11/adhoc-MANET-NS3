@@ -22,6 +22,14 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function safeReadText(response: Response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
+
 function computeEdges(nodes: NodePoint[], range: number, linkFailureEnabled: boolean): Edge[] {
   const generated: Edge[] = [];
 
@@ -191,12 +199,45 @@ export default function App() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/find-route`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceId, destinationId }),
-      });
-      const data = (await response.json()) as RouteResponse;
+      let response: Response | null = null;
+
+      // Render free instances can wake up slowly; retry once before failing.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          response = await fetch(`${API_BASE}/find-route`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourceId, destinationId }),
+          });
+          if (response.ok) {
+            break;
+          }
+        } catch {
+          // Continue to retry path below.
+        }
+
+        if (attempt === 0) {
+          addLog('Backend waking up... retrying route request.');
+          await sleep(1200);
+        }
+      }
+
+      if (!response) {
+        throw new Error('No response from backend');
+      }
+
+      if (!response.ok) {
+        const text = await safeReadText(response);
+        throw new Error(`HTTP ${response.status}${text ? `: ${text.slice(0, 80)}` : ''}`);
+      }
+
+      let data: RouteResponse;
+      try {
+        data = (await response.json()) as RouteResponse;
+      } catch {
+        const text = await safeReadText(response);
+        throw new Error(`Invalid JSON response${text ? `: ${text.slice(0, 80)}` : ''}`);
+      }
 
       setRoutePath(data.path);
       setHopCount(data.hopCount);
@@ -210,8 +251,9 @@ export default function App() {
 
       addLog(`Route discovered: ${data.path.join(' -> ')}. Sending packet...`);
       await animatePath(data.path);
-    } catch {
-      addLog('Backend routing request failed. Is the server running on port 5000?');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      addLog(`Backend routing request failed (${reason}).`);
     }
   }
 
